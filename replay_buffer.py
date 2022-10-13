@@ -57,12 +57,12 @@ class ExperiencePool():
     def add_priority_buffer(self, experience):
         self.pool_2.add(experience)
 
-    def sample(self, episode = None):
+    def sample(self):
         if Configurations.PRIORITY_BUFFER:
-            if episode < 2000:
+            if Configurations.CURRENT_EPISODE < 2000:
                 priority_size = min(int(0.5 * Configurations.MINI_BATCH_SIZE), len(self.pool_2))
                 batch_size = Configurations.MINI_BATCH_SIZE - priority_size
-            elif episode < 4000:
+            elif Configurations.CURRENT_EPISODE < 4000:
                 priority_size = min(int(0.2 * Configurations.MINI_BATCH_SIZE), len(self.pool_2))
                 batch_size = Configurations.MINI_BATCH_SIZE - priority_size
             else:
