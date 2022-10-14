@@ -2,8 +2,6 @@
 All configurations related to the model are stored here.
 '''
 
-from explorer import GaussianExplorer
-
 
 class Configurations:
     ######################

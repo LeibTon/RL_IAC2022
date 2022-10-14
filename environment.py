@@ -14,7 +14,7 @@ class Environment:
         '''
         #### Rocket Params
         self.R_E = 6378.4 # in km
-        self.DIST_EARTH_END = 145
+        self.DIST_EARTH_END = 145 # in km
         self.R_SE = self.R_E + self.DIST_EARTH_END # in km # Distance of 
         self.L = 1005  # in km
         self.R_SO = self.R_SE + self.L # radius of skyhook's COM
@@ -26,7 +26,6 @@ class Environment:
         self.burnout_mass = 131600
         self.u_e = 3
         self.rho0 = 1.752e+9 # in kg/km^3
-        self.v0 = np.sqrt(self.H0 * self.g0) 
 
         #### Drone Params
         self.D_amax =  0.01 # Maximum accln provided by drone's thruster slighlty greater than g0
@@ -54,10 +53,10 @@ class Environment:
         x --> [v, r, m]
         '''
         v = x[0]
-        u = args[0]
-        T = self.T_max * u
         r = x[1]
         m = x[2]
+        u = args[0]
+        T = self.T_max * u
         g = self.g0 * self.R_E ** 2 / r**2
         D = (v**2)*1.732*.1*np.pi*0.05**2*np.exp(-(r - self.R_E)/self.H)/4
         v_dot = (T - D)/m - g
@@ -130,9 +129,6 @@ class Environment:
         skyhook_done = next_states["skyhook"][1] > 1.5725
 
         return next_states, drone_reward, rocket_reward, drone_done, rocket_done, skyhook_done
-        # Till this point all things has been calculated.
-
-        # Now done and reward.
     
     def check_drone_constraint(self, next_states):
         skyhook_end_position = self.get_skyhook_end_position(next_states["skyhook"])
@@ -157,9 +153,9 @@ class Environment:
         drone_reward = 0
         e_p = np.sqrt((states["drone"]["state"][0])**2 + (states["drone"]["state"][1] - states["rocket"]["state"][1])**2)/Configurations.DRONE_DIST_REF
         e_n = np.sqrt((next_states["drone"]["state"][0])**2 + (next_states["drone"]["state"][1] - next_states["rocket"]["state"][1])**2)/Configurations.DRONE_DIST_REF
-        e_v = np.sqrt((next_states["drone"]["state"][2])**2 + (next_states["drone"]["state"][3] - next_states["rocket"]["states"][0])**2)/Configurations.DRONE_VELOCITY_REF
+        e_v = np.sqrt((next_states["drone"]["state"][2])**2 + (next_states["drone"]["state"][3] - next_states["rocket"]["state"][0])**2)/Configurations.DRONE_VELOCITY_REF
         
-        velocity_component = e_v / (e_n + 1e-4) 
+        velocity_component = e_v / (e_n + 1) 
         if np.sign(e_p - e_n) >= 0:
             drone_reward += 1
         else:
@@ -182,11 +178,11 @@ class Environment:
         if np.any(np.isnan(next_states["rocket"]["state"])):
             return -5, True
         
-        e_p = np.sqrt((self.R_SE * np.cos(states["skyhook"][1])) + (self.R_SE * np.sin(states["skyhook"][1])- states["rocket"]["state"][1]))/Configurations.ROCKET_DIST_REF
-        e_n = np.sqrt((next_states["skyhook"][0] * np.cos(next_states["skyhook"][1])) + (next_states["skyhook"][0] * np.sin(next_states["skyhook"][1])- next_states["rocket"]["state"][1]))/Configurations.ROCKET_DIST_REF
-        e_v = np.abs(next_states["rocket"][0])/Configurations.ROCKET_VELOCITY_REF
+        e_p = np.sqrt((self.R_SE * np.cos(states["skyhook"][1]))**2 + (self.R_SE * np.sin(states["skyhook"][1])- states["rocket"]["state"][1])**2)/Configurations.ROCKET_DIST_REF
+        e_n = np.sqrt((self.R_SE * np.cos(next_states["skyhook"][1]))**2 + (self.R_SE * np.sin(next_states["skyhook"][1])- next_states["rocket"]["state"][1])**2)/Configurations.ROCKET_DIST_REF
+        e_v = np.abs(next_states["rocket"]["state"][0])/Configurations.ROCKET_VELOCITY_REF
 
-        velocity_component = e_v / (e_n + 1e-4) 
+        velocity_component = e_v / (e_n + 1) 
 
         rocket_reward = 0
         if np.sign(e_p - e_n) >= 0:
@@ -207,7 +203,7 @@ class Environment:
         
         # Reached appropriate position
         if e_n * Configurations.ROCKET_DIST_REF < 0.001:
-            if next_states["rocket"][0] < 1:
+            if next_states["rocket"]["state"][0] < 0.001:
                 print("Mission Successful")
                 return rocket_reward + 10, True
             else:

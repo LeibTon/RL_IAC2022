@@ -1,10 +1,11 @@
 import numpy as np
+import torch as th
 from copy import deepcopy
 import matplotlib.pyplot as plt
 import json
 from config import Configurations
 
-
+device = th.device("cuda" if th.cuda.is_available() else "cpu")
 ###############################
 # REF: https://bit.ly/3RkXEtg
 ###############################
@@ -27,6 +28,7 @@ class Explorer:
         self.total_drone_reward = 0
         self.total_rocket_reward = 0
         self.state_storage_for_priority = []
+        self.init()
     
     def get_skyhook_end_position(self, skyhook_state):
         r = skyhook_state[0]
@@ -51,7 +53,7 @@ class Explorer:
         self.state = {
             "skyhook": skyhook_state,
             "rocket": {
-                "state": np.array([self.R_E, 0.001, self.initial_mass]),
+                "state": np.array([0.001, self.R_E, self.initial_mass]),
                 "check_flag": np.array([0, 0])
             },
             "drone": {
@@ -66,7 +68,7 @@ class Explorer:
         This function transfers the dictionary to something valuable.
         '''
         drone_state = np.array([states["drone"]["state"][0], states["drone"]["state"][1] - states["rocket"]["state"][1], states["drone"]["state"][2], states["drone"]["state"][3] - states["rocket"]["state"][0]])
-        rocket_state = np.array([self.R_SE * np.cos(states["skyhook"][1]), self.R_SE * np.sin(states["skyhook"][1])- states["rocket"]["state"][1], states["rocket"][0], states["rocket"][2]])
+        rocket_state = np.array([self.R_SE * np.cos(states["skyhook"][1]), self.R_SE * np.sin(states["skyhook"][1])- states["rocket"]["state"][1], states["rocket"]["state"][0], states["rocket"]["state"][2]])
         if cat:
             return np.concatenate([drone_state, rocket_state])
         else:
@@ -74,8 +76,10 @@ class Explorer:
     
     def get_action(self, model):
         rocket_state, drone_state = self.get_model_states(self.state, False)
-        rocket_action = model.RI_controller.actor(rocket_state).detach().cpu().to_numpy()
-        drone_action = model.DI_controller.actor(drone_state).detach().cpu().to_numpy()
+        rocket_state = th.from_numpy(rocket_state).float().to(device)
+        drone_state = th.from_numpy(drone_state).float().to(device)
+        rocket_action = model.RI_controller.actor(rocket_state).detach().cpu().numpy()
+        drone_action = model.DI_controller.actor(drone_state).detach().cpu().numpy()
 
         return {"rocket": rocket_action, "drone": drone_action}
     
@@ -85,9 +89,9 @@ class Explorer:
         """
         action_modified = deepcopy(action)
         action_modified["rocket"] = np.argmax(action["rocket"])
-        next_states, drone_reward, rocket_reward, drone_done, rocket_done, skyhook_done = environment.step(self.states, action_modified)
-        exp_state = self.get_model_states(self.states, cat = True)
-        exp_next_state = self.get_model_states(next_states, cat = True)
+        next_state, drone_reward, rocket_reward, drone_done, rocket_done, skyhook_done = environment.step(self.state, action_modified)
+        exp_state = self.get_model_states(self.state, cat = True)
+        exp_next_state = self.get_model_states(next_state, cat = True)
         exp_reward = np.array([rocket_reward, drone_reward])
         exp_done = np.array([rocket_done, drone_done])
         exp_action = np.zeros(4)
@@ -98,6 +102,7 @@ class Explorer:
         self.state_storage_for_priority.append([exp_state, exp_action, exp_reward, exp_next_state, exp_done])
 
         # Priority buffer addition here.
+        replay_buffer.add_buffer([exp_state, exp_action, exp_reward, exp_next_state, exp_done])
         if skyhook_done or drone_done or rocket_done:
             if max(self.total_drone_reward, self.total_rocket_reward) >= Configurations.MAX_TOTAL_REWARD:
                 Configurations.MAX_TOTAL_REWARD = max(self.total_drone_reward, self.total_rocket_reward)
@@ -106,16 +111,16 @@ class Explorer:
                 self.total_drone_reward = 0
                 self.total_rocket_reward = 0
                 self.state_storage_for_priority = []
+            replay_buffer.reset()  # reset the n_steps when done.
 
-        replay_buffer.add_buffer([exp_state, exp_action, exp_reward, exp_next_state, exp_done])
-        self.state = next_states
+        self.state = next_state
         return drone_reward, rocket_reward, skyhook_done or drone_done or rocket_done
 
 
 
 class TestAgent(Explorer):
     def __init__(self):
-        super(TestAgent).__init__("test")
+        super(TestAgent, self).__init__("test")
     
     def run(self, model, environment, replay_buffer):
         self.init()
@@ -171,7 +176,7 @@ class TestAgent(Explorer):
     
 class BetaExplorer(Explorer):
     def __init__(self, factor):
-        super(BetaExplorer).__init__("train")
+        super(BetaExplorer, self).__init__("train")
         self.factor = factor
     
     def run(self, model, environment, replay_buffer):
@@ -192,7 +197,7 @@ class BetaExplorer(Explorer):
         alpha = 1/noise_scale
         value = 0.5 + drone_action / 2
         beta = alpha * (1 - value)/value
-        beta = beta + 1*((alpha - beta)/alpha)
+        beta = np.abs(beta + 1*((alpha - beta)/alpha))
         sample = np.random.beta(alpha, beta)
         sample = sign * sample + (1 - sign)/2
 
@@ -207,7 +212,7 @@ class BetaExplorer(Explorer):
 
 class OUExplorer(Explorer):
     def __init__(self, factor):
-        super(OUExplorer).__init__("train")
+        super(OUExplorer, self).__init__("train")
         self.action_size = 2
         self.factor = factor
         self.mu_drone = 0
@@ -240,7 +245,7 @@ class OUExplorer(Explorer):
 
 class GaussianExplorer(Explorer):
     def __init__(self, factor):
-        super(GaussianExplorer).__init__("train")
+        super(GaussianExplorer, self).__init__("train")
         self.factor = factor
     
     def run(self, model, environment, replay_buffer):
@@ -260,7 +265,7 @@ class GaussianExplorer(Explorer):
 
 class epsilonExplorer(Explorer):
     def __init__(self, factor):
-        super(epsilonExplorer).__init__("train")
+        super(epsilonExplorer, self).__init__("train")
         self.factor = factor
     
     def run(self, model, environment, replay_buffer):

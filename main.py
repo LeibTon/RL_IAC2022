@@ -8,10 +8,6 @@ Main script that runs the MADDPG model.
 -- Simple problem.
 '''
 
-import numpy as np
-import random
-import torch as th
-import matplotlib.pyplot as plt
 
 from config import Configurations
 from environment import Environment
@@ -19,8 +15,6 @@ from replay_buffer import ExperiencePool
 from maddpg import MADDPG
 from explorer import TestAgent, OUExplorer, GaussianExplorer,epsilonExplorer, BetaExplorer
 
-import os
-from collections import deque
 
 
 env = Environment()
@@ -59,7 +53,7 @@ else:
 while Configurations.CURRENT_EPISODE <= Configurations.TOTAL_EPISODES:
     for agent in agents:
         agent.run(model, env, pool)
-    model.update()
+    model.update(pool)
     if Configurations.CURRENT_EPISODE % 10 == 0:
         test_agent.run()
     

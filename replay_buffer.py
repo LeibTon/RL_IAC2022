@@ -71,7 +71,10 @@ class ExperiencePool():
             sampled_batch = self.pool_1.sample(batch_size) + self.pool_2.sample(priority_size)
         else:
             sampled_batch = self.pool_1.sample(Configurations.MINI_BATCH_SIZE)
+        print(len(sampled_batch), len(sampled_batch[0]), len(sampled_batch[1][0]))
         sampled_batch = np.asarray(sampled_batch)
+        print(sampled_batch.shape)
+        print(sampled_batch[:,0,:].shape)
         states_batch = np.stack(sampled_batch[:,0])
         actions_batch = np.stack(sampled_batch[:,1])
         rewards_batch = sampled_batch[:,2]

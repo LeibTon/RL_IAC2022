@@ -15,11 +15,11 @@ def initialize_weights(net, low=-3e-2, high=3e-2):
 
 class Actor(nn.Module):
     def __init__(self, action_size, state_size, action_type):
-        super(Actor).__init__()
+        super(Actor, self).__init__()
         self.action_type = action_type
-        self.FC1 = nn.Linear(state_size, Configurations.ROCKET_CRITIC_LAYERS[0])
-        self.FC2 = nn.Linear(Configurations.ROCKET_CRITIC_LAYERS[0], Configurations.ROCKET_CRITIC_LAYERS[1])
-        self.FC3 = nn.Linear(Configurations.ROCKET_CRITIC_LAYERS[1], action_size)
+        self.FC1 = nn.Linear(state_size, Configurations.ACTOR_LAYERS[0])
+        self.FC2 = nn.Linear(Configurations.ACTOR_LAYERS[0], Configurations.ACTOR_LAYERS[1])
+        self.FC3 = nn.Linear(Configurations.ACTOR_LAYERS[1], action_size)
         initialize_weights(self)
     
     def forward(self, state):
@@ -33,10 +33,10 @@ class Actor(nn.Module):
 
 class Critic(nn.Module):
     def __init__(self, actions_size, states_size, num_atoms):
-        super(Critic).__init__()
-        self.FC1 = nn.Linear(states_size, Configurations.ROCKET_CRITIC_LAYERS[0])
-        self.FC2 = nn.Linear(Configurations.ROCKET_CRITIC_LAYERS[0] + actions_size, Configurations.ROCKET_CRITIC_LAYERS[1])
-        self.FC3 = nn.Linear(Configurations.ROCKET_CRITIC_LAYERS[1], num_atoms)
+        super(Critic, self).__init__()
+        self.FC1 = nn.Linear(states_size, Configurations.CRITIC_LAYERS[0])
+        self.FC2 = nn.Linear(Configurations.CRITIC_LAYERS[0] + actions_size, Configurations.CRITIC_LAYERS[1])
+        self.FC3 = nn.Linear(Configurations.CRITIC_LAYERS[1], num_atoms)
         initialize_weights(self)
     
     def forward(self, states, actions, log = False):

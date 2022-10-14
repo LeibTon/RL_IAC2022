@@ -1,0 +1,1 @@
+episode_number rocket_reward drone_reward rocket_velocity rocket_position dist_drone_rocket vel_drone_rocket
