@@ -8,13 +8,12 @@ from collections import deque
 
 from config import Configurations
 
+
 class ReplayBuffer():
 
     def __init__(self, max_length):
+        self.max_length = max_length
         self.buffer = deque(maxlen = max_length)
-        self.n_step_buffer = deque(maxlen = Configurations.N_STEPS)
-
-    def reset(self):
         self.n_step_buffer = deque(maxlen = Configurations.N_STEPS)
 
     def __len__(self):
@@ -22,19 +21,10 @@ class ReplayBuffer():
     
     def add(self, experience):
         '''n-step mechanism'''
-        self.n_step_buffer.append(experience)
-        if len(self.n_step_buffer) == Configurations.N_STEPS:
-            start_state, start_action, start_reward, start_next_state, start_done = self.n_step_buffer[0]
-            n_state, n_action, n_reward, n_next_state, n_done = self.n_step_buffer[-1]
+        self.buffer.append(experience)
 
-            summed_reward = np.zeros(2)
-            for i, n_transition in enumerate(self.n_step_buffer):
-                state, action, reward, next_state, done = n_transition
-                summed_reward += reward * Configurations.N_STEPS_DISCOUNT_FACTOR**(i + 1)
-                if np.any(done):
-                    break
-            transition = [start_state, start_action, summed_reward, n_next_state, n_done]
-            self.buffer.append(transition)
+    def reset(self):
+        self.buffer = deque(maxlen = self.max_length)
 
 
     def sample(self, size_needed):
@@ -59,10 +49,10 @@ class ExperiencePool():
 
     def sample(self):
         if Configurations.PRIORITY_BUFFER:
-            if Configurations.CURRENT_EPISODE < 2000:
+            if Configurations.CURRENT_EPISODE < 10000:
                 priority_size = min(int(0.5 * Configurations.MINI_BATCH_SIZE), len(self.pool_2))
                 batch_size = Configurations.MINI_BATCH_SIZE - priority_size
-            elif Configurations.CURRENT_EPISODE < 4000:
+            elif Configurations.CURRENT_EPISODE < 20000:
                 priority_size = min(int(0.2 * Configurations.MINI_BATCH_SIZE), len(self.pool_2))
                 batch_size = Configurations.MINI_BATCH_SIZE - priority_size
             else:
@@ -71,18 +61,15 @@ class ExperiencePool():
             sampled_batch = self.pool_1.sample(batch_size) + self.pool_2.sample(priority_size)
         else:
             sampled_batch = self.pool_1.sample(Configurations.MINI_BATCH_SIZE)
-        print(len(sampled_batch), len(sampled_batch[0]), len(sampled_batch[1][0]))
-        sampled_batch = np.asarray(sampled_batch)
-        print(sampled_batch.shape)
-        print(sampled_batch[:,0,:].shape)
-        states_batch = np.stack(sampled_batch[:,0])
-        actions_batch = np.stack(sampled_batch[:,1])
-        rewards_batch = sampled_batch[:,2]
-        next_states_batch = np.stack(sampled_batch[:,3])
-        dones_batch = np.stack(sampled_batch[:,4])
 
+        states_batch = np.stack([item[0] for item in sampled_batch])
+        actions_batch = np.stack([item[1] for item in sampled_batch])
+        rewards_batch = np.stack([item[2] for item in sampled_batch])
+        next_states_batch = np.stack([item[3] for item in sampled_batch])
+        dones_batch = np.stack([item[4] for item in sampled_batch])
         return states_batch, actions_batch, rewards_batch, next_states_batch, dones_batch
+    def __len__(self):
+        return len(self.pool_1)
     
-    def reset(self):
+    def reset_pool1(self):
         self.pool_1.reset()
-        self.pool_2.reset()

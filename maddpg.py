@@ -7,7 +7,7 @@ from config import Configurations
 
 device = th.device("cuda" if th.cuda.is_available() else "cpu")
 
-
+MSELoss = th.nn.MSELoss()
 ########################################################
 # Ref: https://bit.ly/3UMCfMr
 ##########################################################
@@ -69,7 +69,7 @@ class MADDPG:
         '''
         This function saves the values.
         '''
-        file_path = "model/models_eps_"+Configurations.CURRENT_EPISODE +".pt"
+        file_path = "model/models_eps_"+str(Configurations.CURRENT_EPISODE) +".pt"
         th.save({
             'model_drone_agent_state_dict': self.DI_controller.actor.state_dict(),
             'model_drone_critic_state_dict': self.DI_controller.critic.state_dict(),
@@ -86,12 +86,15 @@ class MADDPG:
         '''
         Performs a distributional Actor/Critic Calculation and update.
         '''
+        if len(replay_buffer) <= 1:
+            print("Not enough samples for training")
+            return 1
         states_batch, actions_batch, rewards_batch, next_states_batch, dones_batch = replay_buffer.sample()
 
-        states_tensor = th.from_numpy(states_batch).to(device)
-        actions_tensor = th.from_numpy(actions_batch).to(device)
-        rewards_tensor = th.from_numpy(rewards_batch).to(device)
-        next_states_tensor = th.from_numpy(next_states_batch).to(device)
+        states_tensor = th.from_numpy(states_batch).float().to(device)
+        actions_tensor = th.from_numpy(actions_batch).float().to(device)
+        rewards_tensor = th.from_numpy(rewards_batch).float().to(device)
+        next_states_tensor = th.from_numpy(next_states_batch).float().to(device)
         dones_tensor = th.from_numpy(dones_batch).to(device)
 
         states_tensor_rocket = states_tensor[:, :Configurations.ROCKET_STATE_SIZE]
@@ -105,22 +108,27 @@ class MADDPG:
         next_states_tensor_rocket = next_states_tensor[:, :Configurations.ROCKET_STATE_SIZE]
         next_states_tensor_drone = next_states_tensor[:, Configurations.ROCKET_STATE_SIZE:]
 
-        target_actions_rocket = self.RI_controller.target_actor(next_states_tensor_rocket)
-        target_actions_drone = self.DI_controller.target_actor(next_states_tensor_drone)
+        target_actions_rocket = self.RI_controller.target_actor(next_states_tensor_rocket).detach()
+        target_actions_drone = self.DI_controller.target_actor(next_states_tensor_drone).detach()
         target_actions = th.cat([target_actions_rocket, target_actions_drone], dim = 1)
-
+    
         #################################
         # updating Rocket Controller DDPG
         ##################################
         # update critic network
         self.RI_controller.critic_optimizer.zero_grad()
-        target_probs = self.RI_controller.target_critic(next_states_tensor, target_actions).detach()
-        target_dist = self.to_categorical(rewards_tensor_rocket.unsqueeze(-1), target_probs, done_tensor_rocket.unsqueeze(-1))
-        log_probs = self.RI_controller.critic(states_tensor, actions_tensor, log = True)
-        critic_loss = -(target_dist * log_probs).sum(-1).mean()
+        current_value_r = self.RI_controller.critic(states_tensor, actions_tensor)
+        target_q_values = self.RI_controller.target_critic(next_states_tensor, target_actions).squeeze()
+        target_value_r = rewards_tensor_rocket + Configurations.GAMMA*target_q_values*(1 - done_tensor_rocket.float())
+        critic_loss_r = MSELoss(current_value_r.squeeze(), target_value_r)
+        # target_probs = self.RI_controller.target_critic(next_states_tensor, target_actions).detach()
+        # target_dist = self.to_categorical(rewards_tensor_rocket.unsqueeze(-1), target_probs, done_tensor_rocket.unsqueeze(-1))
+        # log_probs = self.RI_controller.critic(states_tensor, actions_tensor, log = True)
+        # print(target_dist, log_probs)
+        # critic_loss = -(target_dist * log_probs).sum(-1).mean()
 
-        critic_loss.backward()
-        th.nn.utils.clip_grad_norm_(self.RI_controller.critic.parameters(), 1)
+        critic_loss_r.backward()
+        # th.nn.utils.clip_grad_norm_(self.RI_controller.critic.parameters(), 1)
         self.RI_controller.critic_optimizer.step()
 
         if self.num_steps % Configurations.ACTOR_UPDATE == 0:
@@ -128,25 +136,21 @@ class MADDPG:
             self.RI_controller.actor_optimizer.zero_grad()
             actor_actions = [self.RI_controller.actor(states_tensor_rocket), self.DI_controller.actor(states_tensor_drone).detach()]
             actor_actions = th.cat(actor_actions, dim = 1)
-            critic_probs = self.RI_controller.critic(states_tensor, actor_actions)
-            expected_reward = (critic_probs * self.atoms).sum(-1)
-            actor_loss = -expected_reward.mean()
-            actor_loss.backward(retain_graph = True)
+            actor_loss_r = -self.RI_controller.critic(states_tensor, actor_actions).mean()
+            actor_loss_r.backward(retain_graph = True)
             self.RI_controller.actor_optimizer.step()
-
         
         #################################
         # updating Drone Controller DDPG
         #################################
         # update critic network
         self.DI_controller.critic_optimizer.zero_grad()
-        target_probs = self.DI_controller.target_critic(next_states_tensor, target_actions).detach()
-        target_dist = self.to_categorical(rewards_tensor_drone.unsqueeze(-1), target_probs, done_tensor_drone.unsqueeze(-1))
-        log_probs = self.DI_controller.critic(states_tensor, actions_tensor, log = True)
-        critic_loss = -(target_dist * log_probs).sum(-1).mean()
+        current_value_d = self.DI_controller.critic(states_tensor, actions_tensor)
+        target_value_d = rewards_tensor_drone + Configurations.GAMMA*self.DI_controller.target_critic(next_states_tensor, target_actions).squeeze()*(1 - done_tensor_drone.float())
+        critic_loss_d = MSELoss(current_value_d.squeeze(), target_value_d)
 
-        critic_loss.backward()
-        th.nn.utils.clip_grad_norm_(self.DI_controller.critic.parameters(), 1)
+        critic_loss_d.backward()
+        # th.nn.utils.clip_grad_norm_(self.DI_controller.critic.parameters(), 1)
         self.DI_controller.critic_optimizer.step()
 
         if self.num_steps % Configurations.ACTOR_UPDATE == 0:
@@ -154,10 +158,8 @@ class MADDPG:
             self.DI_controller.actor_optimizer.zero_grad()
             actor_actions = [self.RI_controller.actor(states_tensor_rocket).detach(), self.DI_controller.actor(states_tensor_drone)]
             actor_actions = th.cat(actor_actions, dim = 1)
-            critic_probs = self.DI_controller.critic(states_tensor, actor_actions)
-            expected_reward = (critic_probs * self.atoms).sum(-1)
-            actor_loss = -expected_reward.mean()
-            actor_loss.backward(retain_graph = True)
+            actor_loss_d = -self.DI_controller.critic(states_tensor, actor_actions).mean()
+            actor_loss_d.backward(retain_graph = True)
             self.DI_controller.actor_optimizer.step()
             self.num_steps = 0
 
@@ -166,6 +168,7 @@ class MADDPG:
             self.DI_controller.hardupdate()
         
         self.num_steps+=1
+        return critic_loss_d.item()
         
 
     def to_categorical(self, rewards, probs, dones):
@@ -177,7 +180,7 @@ class MADDPG:
         discount_rate = self.discount_rate
 
         delta_z = (vmax - vmin)/(num_atoms - 1)
-        projected_atoms = rewards + discount_rate**n_steps * atoms * ( 1- dones)
+        projected_atoms = rewards + discount_rate**n_steps * atoms * ( 1- dones.float())
         projected_atoms.clamp_(vmin, vmax)
         b = (projected_atoms - vmin)/delta_z
 

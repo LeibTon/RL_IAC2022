@@ -20,10 +20,10 @@ class Environment:
         self.R_SO = self.R_SE + self.L # radius of skyhook's COM
         self.H = 6.7 # in km
         self.g0 = 0.00981 # in km/s^-2
-        self.T_max = 3843.425
-        self.initial_mass = 408900
-        self.fuel_mass = 277300
-        self.burnout_mass = 131600
+        self.T_max = 3870
+        self.fuel_mass = 301000
+        self.burnout_mass = 80000
+        self.initial_mass = self.fuel_mass + self.burnout_mass
         self.u_e = 3
         self.rho0 = 1.752e+9 # in kg/km^3
 
@@ -57,9 +57,8 @@ class Environment:
         m = x[2]
         u = args[0]
         T = self.T_max * u
-        g = self.g0 * self.R_E ** 2 / r**2
-        D = (v**2)*1.732*.1*np.pi*0.05**2*np.exp(-(r - self.R_E)/self.H)/4
-        v_dot = (T - D)/m - g
+        g = self.g0
+        v_dot = T/m - g
         r_dot = v
         m_dot = -T/self.u_e
         return np.array([v_dot, r_dot, m_dot])
@@ -125,7 +124,6 @@ class Environment:
 
         drone_reward, drone_done = self.get_drone_reward(states, next_states, actions)
         rocket_reward, rocket_done = self.get_rocket_reward(states, next_states, actions)
-
         skyhook_done = next_states["skyhook"][1] > 1.5725
 
         return next_states, drone_reward, rocket_reward, drone_done, rocket_done, skyhook_done
@@ -142,11 +140,12 @@ class Environment:
     def get_drone_reward(self, states, next_states, actions):
         # check if the drone within skyhook or not.
         if next_states["drone"]["mu"] == 1:
-            return 1 - np.mean(np.abs(actions["drone"])), True
+            return 1 - np.mean(np.abs(actions["drone"])), False
     
 
         # check if nan values encountered or not.
         if np.any(np.isnan(next_states["drone"]["state"])):
+            next_states["drone"] = states["drone"]
             return -5 - np.mean(np.abs(actions["drone"])), True
         
         # in case of normal cases.
@@ -161,7 +160,7 @@ class Environment:
         else:
             drone_reward -= 2
         
-        drone_reward += (1 - e_n)
+        drone_reward += (1 - np.sqrt(e_n))
         drone_reward -= velocity_component
 
         drone_reward += (1 - np.mean(np.abs(actions["drone"])))
@@ -176,42 +175,45 @@ class Environment:
     def get_rocket_reward(self, states, next_states, actions):
         # check if nan values encountered or not.
         if np.any(np.isnan(next_states["rocket"]["state"])):
+            next_states["rocket"] = states["rocket"]
             return -5, True
         
         e_p = np.sqrt((self.R_SE * np.cos(states["skyhook"][1]))**2 + (self.R_SE * np.sin(states["skyhook"][1])- states["rocket"]["state"][1])**2)/Configurations.ROCKET_DIST_REF
         e_n = np.sqrt((self.R_SE * np.cos(next_states["skyhook"][1]))**2 + (self.R_SE * np.sin(next_states["skyhook"][1])- next_states["rocket"]["state"][1])**2)/Configurations.ROCKET_DIST_REF
         e_v = np.abs(next_states["rocket"]["state"][0])/Configurations.ROCKET_VELOCITY_REF
 
+        fuel_conservation = next_states["rocket"]["state"][2]/self.initial_mass
         velocity_component = e_v / (e_n + 1) 
 
         rocket_reward = 0
-        if np.sign(e_p - e_n) >= 0:
+        if np.sign(e_p - e_n) > 0:
+            rocket_reward += 2
+        elif np.sign(e_p - e_n) == 0:
             rocket_reward += 1
         else:
             rocket_reward -= 2
         
-        rocket_reward += (1 - e_n)
-        rocket_reward -= velocity_component
+        rocket_reward += (1 - np.sqrt(e_n)) * fuel_conservation
 
         # Can't restart the rocket
         if next_states["rocket"]["check_flag"][0] == 1 and next_states["rocket"]["check_flag"][1] == 1 and actions["rocket"] == 1:
             return rocket_reward - 2, True
         
         # Rocket crashed
-        if next_states["rocket"]["state"][1] < 0:
+        if next_states["rocket"]["state"][1]-self.R_E < 0:
             return rocket_reward - 4, True
         
         # Reached appropriate position
         if e_n * Configurations.ROCKET_DIST_REF < 0.001:
             if next_states["rocket"]["state"][0] < 0.001:
                 print("Mission Successful")
-                return rocket_reward + 10, True
+                return rocket_reward + 8, True
             else:
                 return rocket_reward - 2, True
         
         # Mass went negative.
-        if next_states["rocket"]["state"][2] < 0:
-            return rocket_reward - 4, True
+        if next_states["rocket"]["state"][2] < 2 * self.T_max/self.u_e:
+            return rocket_reward - 2, True
         
         return rocket_reward, False
 
